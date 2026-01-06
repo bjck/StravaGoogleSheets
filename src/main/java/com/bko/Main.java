@@ -132,7 +132,7 @@ public class Main {
                     valuesToAppend.add(row);
                 }
 
-                googleSheetsService.appendActivities(sheetName + "!A1", valuesToAppend);
+                googleSheetsService.insertActivitiesAtTop(sheetName, valuesToAppend);
                 System.out.println("Sync complete!");
             }
 

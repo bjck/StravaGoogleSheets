@@ -74,6 +74,38 @@ public class GoogleSheetsService {
         System.out.println("Appended " + result.getUpdates().getUpdatedCells() + " cells.");
     }
 
+    public void insertActivitiesAtTop(String sheetName, List<List<Object>> values) throws IOException {
+        if (values.isEmpty()) return;
+
+        Integer sheetId = getSheetId(sheetName);
+        int numRows = values.size();
+
+        // 1. Insert empty rows at the top (after the header, which is at index 0)
+        com.google.api.services.sheets.v4.model.Request request = new com.google.api.services.sheets.v4.model.Request()
+                .setInsertDimension(new com.google.api.services.sheets.v4.model.InsertDimensionRequest()
+                        .setRange(new com.google.api.services.sheets.v4.model.DimensionRange()
+                                .setSheetId(sheetId)
+                                .setDimension("ROWS")
+                                .setStartIndex(1) // Row 2
+                                .setEndIndex(1 + numRows))
+                        .setInheritFromBefore(false));
+
+        com.google.api.services.sheets.v4.model.BatchUpdateSpreadsheetRequest batchRequest =
+                new com.google.api.services.sheets.v4.model.BatchUpdateSpreadsheetRequest()
+                        .setRequests(Collections.singletonList(request));
+
+        sheetsService.spreadsheets().batchUpdate(spreadsheetId, batchRequest).execute();
+
+        // 2. Fill the new rows with data
+        ValueRange body = new ValueRange().setValues(values);
+        sheetsService.spreadsheets().values()
+                .update(spreadsheetId, sheetName + "!A2", body)
+                .setValueInputOption("RAW")
+                .execute();
+
+        System.out.println("Inserted " + numRows + " rows at the top (below header).");
+    }
+
     public void ensureHeaders(String sheetName, List<Object> headers) throws IOException {
         List<List<Object>> firstRow = null;
         try {
