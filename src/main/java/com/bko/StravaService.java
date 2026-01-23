@@ -109,4 +109,25 @@ public class StravaService {
             throw e;
         }
     }
+
+    public StravaActivity getActivity(Long id) throws IOException {
+        if (accessToken == null) {
+            refreshAccessToken();
+        }
+
+        try {
+            String response = Request.get(STRAVA_API_BASE + "/activities/" + id)
+                    .addHeader("Authorization", "Bearer " + accessToken)
+                    .execute()
+                    .returnContent()
+                    .asString();
+
+            return objectMapper.readValue(response, StravaActivity.class);
+        } catch (org.apache.hc.client5.http.HttpResponseException e) {
+            if (e.getStatusCode() == 401) {
+                System.err.println("Error 401: Unauthorized.");
+            }
+            throw e;
+        }
+    }
 }
