@@ -1,20 +1,18 @@
-package com.bko;
+package com.bko.fitnessextractor.integrations.strava;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-
-import java.time.ZonedDateTime;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class StravaActivity {
     private Long id;
     private String name;
     private String type;
-    private Double distance; // in meters
+    private Double distance;
     @JsonProperty("moving_time")
-    private Integer movingTime; // in seconds
+    private Integer movingTime;
     @JsonProperty("elapsed_time")
-    private Integer elapsedTime; // in seconds
+    private Integer elapsedTime;
     @JsonProperty("total_elevation_gain")
     private Double totalElevationGain;
     @JsonProperty("start_date")
@@ -35,7 +33,6 @@ public class StravaActivity {
     private Integer sufferScore;
     private String description;
 
-    // Getters and Setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public String getName() { return name; }

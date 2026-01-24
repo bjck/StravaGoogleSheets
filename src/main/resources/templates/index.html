@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fitness Extractor Control</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="background-layer"></div>
+<main>
+    <div class="container">
+        <section class="hero">
+            <div>
+                <span class="pill">Sync Console</span>
+                <h1>Fitness Extractor</h1>
+                <p>Trigger Strava and Garmin syncs, track outcomes, and keep your spreadsheet fresh without a terminal.</p>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="status-grid">
+                <div class="status-chip" th:classappend="${config.googleConfigured} ? '' : ' offline'">
+                    Google Sheets
+                    <span th:text="${config.googleConfigured} ? 'Connected' : 'Missing config'"></span>
+                </div>
+                <div class="status-chip" th:classappend="${config.stravaConfigured} ? '' : ' offline'">
+                    Strava
+                    <span th:text="${config.stravaConfigured} ? 'Ready' : 'Missing config'"></span>
+                </div>
+                <div class="status-chip" th:classappend="${config.garminConfigured} ? '' : ' offline'">
+                    Garmin
+                    <span th:text="${config.garminConfigured} ? 'Ready' : 'Missing config'"></span>
+                </div>
+            </div>
+
+            <div class="actions">
+                <div class="card">
+                    <h3>Run Everything</h3>
+                    <p>Sync Strava and Garmin in one pass and update the spreadsheet with the latest data.</p>
+                    <form method="post" action="/sync/all">
+                        <button class="button primary" type="submit">Sync all sources</button>
+                    </form>
+                </div>
+                <div class="card">
+                    <h3>Strava Only</h3>
+                    <p>Fetch fresh activities and insert any new rows at the top of the Strava sheet.</p>
+                    <form method="post" action="/sync/strava">
+                        <button class="button" type="submit">Sync Strava</button>
+                    </form>
+                </div>
+                <div class="card">
+                    <h3>Garmin Only</h3>
+                    <p>Refresh daily Garmin metrics and update today's row if it already exists.</p>
+                    <form method="post" action="/sync/garmin">
+                        <button class="button" type="submit">Sync Garmin</button>
+                    </form>
+                </div>
+                <div class="card">
+                    <h3>Visualize Data</h3>
+                    <p>Explore charts and trends from the Strava and Garmin tabs in your spreadsheet.</p>
+                    <a class="button" href="/visualize">Open dashboard</a>
+                </div>
+            </div>
+
+            <section class="report" th:if="${report != null}">
+                <h3 th:text="${report.success} ? 'Sync completed' : 'Sync completed with warnings'"></h3>
+                <div class="metrics">
+                    <div class="metric">Strava added: <strong th:text="${report.stravaAdded}"></strong></div>
+                    <div class="metric">Garmin inserted: <strong th:text="${report.garminInserted}"></strong></div>
+                    <div class="metric">Garmin updated: <strong th:text="${report.garminUpdated}"></strong></div>
+                </div>
+                <ul class="log-list">
+                    <li th:each="message : ${report.messages}" th:text="${message}"></li>
+                </ul>
+            </section>
+        </section>
+
+        <footer class="footer">
+            Keep your service account JSON and tokens safe. Supply configuration via environment variables or `.env`.
+        </footer>
+    </div>
+</main>
+</body>
+</html>

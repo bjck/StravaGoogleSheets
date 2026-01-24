@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fitness Extractor Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="background-layer"></div>
+<main>
+    <div class="container">
+        <section class="hero">
+            <div>
+                <span class="pill">Insights</span>
+                <h1>Training Dashboard</h1>
+                <p>Visualize Strava activities and Garmin recovery trends directly from your Google Sheets data.</p>
+            </div>
+            <div class="hero-actions">
+                <a class="button" href="/">Sync console</a>
+                <a class="button primary" href="/visualize">Refresh view</a>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="status-grid">
+                <div class="status-chip" th:classappend="${config.googleConfigured} ? '' : ' offline'">
+                    Google Sheets
+                    <span th:text="${config.googleConfigured} ? 'Connected' : 'Missing config'"></span>
+                </div>
+                <div class="status-chip" th:classappend="${config.stravaConfigured} ? '' : ' offline'">
+                    Strava
+                    <span th:text="${config.stravaConfigured} ? 'Ready' : 'Missing config'"></span>
+                </div>
+                <div class="status-chip" th:classappend="${config.garminConfigured} ? '' : ' offline'">
+                    Garmin
+                    <span th:text="${config.garminConfigured} ? 'Ready' : 'Missing config'"></span>
+                </div>
+            </div>
+
+            <section class="summary-block">
+                <div class="summary-header">
+                    <h3>Strava summary</h3>
+                    <p>Totals and latest activity pulled from the Strava sheet.</p>
+                </div>
+                <div class="summary-grid">
+                    <div class="stat-card">
+                        <span class="stat-label">Activities</span>
+                        <div class="stat-value" th:text="${dashboard.strava != null ? dashboard.strava.activityCount : '--'}">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Total distance</span>
+                        <div class="stat-value">
+                            <span th:text="${dashboard.strava != null ? dashboard.strava.totalDistanceKm : '--'}">--</span>
+                            <span class="stat-unit">km</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Moving time</span>
+                        <div class="stat-value">
+                            <span th:text="${dashboard.strava != null ? dashboard.strava.totalMovingHours : '--'}">--</span>
+                            <span class="stat-unit">hrs</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Latest activity</span>
+                        <div class="stat-text" th:text="${dashboard.strava != null ? dashboard.strava.latestActivityLabel : '--'}">--</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="summary-block">
+                <div class="summary-header">
+                    <h3>Garmin summary</h3>
+                    <p>Latest recovery and health metrics from the Garmin sheet.</p>
+                </div>
+                <div class="summary-grid">
+                    <div class="stat-card">
+                        <span class="stat-label">Body Battery max</span>
+                        <div class="stat-value" th:text="${dashboard.garmin != null ? dashboard.garmin.bodyBatteryMax : '--'}">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Body Battery min</span>
+                        <div class="stat-value" th:text="${dashboard.garmin != null ? dashboard.garmin.bodyBatteryMin : '--'}">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Sleep score</span>
+                        <div class="stat-value" th:text="${dashboard.garmin != null ? dashboard.garmin.sleepScore : '--'}">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Resting HR</span>
+                        <div class="stat-value">
+                            <span th:text="${dashboard.garmin != null ? dashboard.garmin.restingHeartRate : '--'}">--</span>
+                            <span class="stat-unit">bpm</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Weight</span>
+                        <div class="stat-value">
+                            <span th:text="${dashboard.garmin != null ? dashboard.garmin.weight : '--'}">--</span>
+                            <span class="stat-unit">kg</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">VO2 Max</span>
+                        <div class="stat-value" th:text="${dashboard.garmin != null ? dashboard.garmin.vo2Max : '--'}">--</div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="chart-grid">
+                <div class="chart-card" th:if="${dashboard.strava != null}">
+                    <div class="chart-header">
+                        <h3>Strava distance trend</h3>
+                        <p>Most recent activities in kilometers.</p>
+                    </div>
+                    <canvas id="stravaChart"></canvas>
+                    <div class="type-list" th:if="${dashboard.strava.typeCounts != null and !dashboard.strava.typeCounts.isEmpty()}">
+                        <div class="type-pill" th:each="entry : ${dashboard.strava.typeCounts}">
+                            <span th:text="${entry.key}">Type</span>
+                            <strong th:text="${entry.value}">0</strong>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-card empty" th:unless="${dashboard.strava != null}">
+                    <h3>Strava data not available</h3>
+                    <p>Run a sync to populate the Strava sheet before visualizing trends.</p>
+                </div>
+
+                <div class="chart-card" th:if="${dashboard.garmin != null}">
+                    <div class="chart-header">
+                        <h3>Garmin recovery trend</h3>
+                        <p>Body battery, sleep score, and resting heart rate.</p>
+                    </div>
+                    <canvas id="garminChart"></canvas>
+                </div>
+                <div class="chart-card empty" th:unless="${dashboard.garmin != null}">
+                    <h3>Garmin data not available</h3>
+                    <p>Sync Garmin metrics to unlock daily recovery trends.</p>
+                </div>
+            </div>
+
+            <section class="report" th:if="${dashboard.hasMessages()}">
+                <h3>Data notes</h3>
+                <ul class="log-list">
+                    <li th:each="message : ${dashboard.messages}" th:text="${message}"></li>
+                </ul>
+            </section>
+        </section>
+
+        <footer class="footer">
+            Data is read directly from your Google Sheets workbook. Run a sync if the charts look empty.
+        </footer>
+    </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script th:inline="javascript">
+    const stravaLabels = [[${dashboard.strava?.chartLabels}]] || [];
+    const stravaDistances = [[${dashboard.strava?.chartDistancesKm}]] || [];
+    const garminLabels = [[${dashboard.garmin?.chartLabels}]] || [];
+    const garminBodyBattery = [[${dashboard.garmin?.bodyBatteryMaxSeries}]] || [];
+    const garminSleepScores = [[${dashboard.garmin?.sleepScoreSeries}]] || [];
+    const garminRestingHr = [[${dashboard.garmin?.restingHeartRateSeries}]] || [];
+
+    const stravaCanvas = document.getElementById("stravaChart");
+    if (stravaCanvas && stravaLabels.length) {
+        new Chart(stravaCanvas, {
+            type: "line",
+            data: {
+                labels: stravaLabels,
+                datasets: [{
+                    label: "Distance (km)",
+                    data: stravaDistances,
+                    borderColor: "#d1793d",
+                    backgroundColor: "rgba(209, 121, 61, 0.2)",
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: true
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
+
+    const garminCanvas = document.getElementById("garminChart");
+    if (garminCanvas && garminLabels.length) {
+        new Chart(garminCanvas, {
+            type: "line",
+            data: {
+                labels: garminLabels,
+                datasets: [
+                    {
+                        label: "Body Battery Max",
+                        data: garminBodyBattery,
+                        borderColor: "#2f3b2e",
+                        backgroundColor: "rgba(47, 59, 46, 0.2)",
+                        tension: 0.35,
+                        pointRadius: 3,
+                        yAxisID: "y"
+                    },
+                    {
+                        label: "Sleep Score",
+                        data: garminSleepScores,
+                        borderColor: "#2bb673",
+                        backgroundColor: "rgba(43, 182, 115, 0.2)",
+                        tension: 0.35,
+                        pointRadius: 3,
+                        yAxisID: "y"
+                    },
+                    {
+                        label: "Resting HR",
+                        data: garminRestingHr,
+                        borderColor: "#d1793d",
+                        backgroundColor: "rgba(209, 121, 61, 0.25)",
+                        tension: 0.35,
+                        pointRadius: 3,
+                        yAxisID: "y1"
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: true
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100
+                    },
+                    y1: {
+                        beginAtZero: false,
+                        position: "right",
+                        grid: {
+                            drawOnChartArea: false
+                        }
+                    }
+                }
+            }
+        });
+    }
+</script>
+</body>
+</html>

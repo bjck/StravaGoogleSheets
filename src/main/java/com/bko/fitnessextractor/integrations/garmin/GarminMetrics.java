@@ -1,4 +1,4 @@
-package com.bko;
+package com.bko.fitnessextractor.integrations.garmin;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.List;
@@ -14,7 +14,6 @@ public class GarminMetrics {
     private Integer sleepScore;
     private Double sleepDurationHours;
 
-    // Getters and Setters
     public String getDate() { return date; }
     public void setDate(String date) { this.date = date; }
 
@@ -51,10 +50,10 @@ public class GarminMetrics {
             sleepDurationHours != null ? sleepDurationHours : ""
         );
     }
-    
+
     public static List<Object> getHeaders() {
         return List.of(
-            "Date", "Body Battery Max", "Body Battery Min", "Weight (kg)", 
+            "Date", "Body Battery Max", "Body Battery Min", "Weight (kg)",
             "VO2 Max", "Resting HR", "Sleep Score", "Sleep Duration (h)"
         );
     }
