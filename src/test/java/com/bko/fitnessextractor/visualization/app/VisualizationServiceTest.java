@@ -31,7 +31,7 @@ class VisualizationServiceTest {
 
         VisualizationSnapshot snapshot = service.loadVisualization();
 
-        assertTrue(snapshot.messages().get(0).contains("Missing Google configuration"));
+        assertTrue(snapshot.messages().getFirst().contains("Missing Google configuration"));
         verifyNoInteractions(spreadsheetPort);
     }
 

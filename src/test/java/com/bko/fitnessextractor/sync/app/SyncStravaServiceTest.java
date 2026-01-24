@@ -37,7 +37,7 @@ class SyncStravaServiceTest {
 
         SyncReport report = service.syncStrava();
 
-        assertTrue(report.getMessages().get(0).contains("Strava credentials missing"));
+        assertTrue(report.getMessages().getFirst().contains("Strava credentials missing"));
         verifyNoInteractions(spreadsheetPort);
         verifyNoInteractions(stravaClientPort);
     }
