@@ -11,6 +11,8 @@ import com.google.api.services.sheets.v4.SheetsScopes;
 import com.google.api.services.sheets.v4.model.AddSheetRequest;
 import com.google.api.services.sheets.v4.model.AppendValuesResponse;
 import com.google.api.services.sheets.v4.model.BatchUpdateSpreadsheetRequest;
+import com.google.api.services.sheets.v4.model.BatchUpdateValuesRequest;
+import com.google.api.services.sheets.v4.model.BatchUpdateValuesResponse;
 import com.google.api.services.sheets.v4.model.DimensionRange;
 import com.google.api.services.sheets.v4.model.InsertDimensionRequest;
 import com.google.api.services.sheets.v4.model.Request;
@@ -31,6 +33,7 @@ import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class GoogleSheetsAdapter implements SpreadsheetPort {
@@ -83,6 +86,43 @@ public class GoogleSheetsAdapter implements SpreadsheetPort {
                 .update(getSpreadsheetId(), range, body)
                 .setValueInputOption(RAW)
                 .execute();
+    }
+
+    @Override
+    public void updateRows(String sheetName, Map<Integer, List<Object>> rows) throws IOException {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+
+        List<ValueRange> data = new java.util.ArrayList<>();
+        for (Map.Entry<Integer, List<Object>> entry : rows.entrySet()) {
+            Integer rowIndex = entry.getKey();
+            if (rowIndex == null || rowIndex < 1) {
+                continue;
+            }
+            List<Object> values = entry.getValue();
+            if (values == null) {
+                continue;
+            }
+            String range = sheetName + "!A" + rowIndex;
+            data.add(new ValueRange().setRange(range).setValues(Collections.singletonList(values)));
+        }
+
+        if (data.isEmpty()) {
+            return;
+        }
+
+        BatchUpdateValuesRequest request = new BatchUpdateValuesRequest()
+                .setValueInputOption(RAW)
+                .setData(data);
+
+        BatchUpdateValuesResponse response = getSheetsService().spreadsheets().values()
+                .batchUpdate(getSpreadsheetId(), request)
+                .execute();
+
+        if (response.getTotalUpdatedCells() != null) {
+            logger.info("Batch updated {} cells.", response.getTotalUpdatedCells());
+        }
     }
 
     @Override

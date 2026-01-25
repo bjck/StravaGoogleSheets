@@ -17,10 +17,18 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -30,6 +38,7 @@ public class GarminHttpClient implements GarminClientPort {
     private static final String SSO_URL = "https://sso.garmin.com/sso/signin";
     private static final String CONNECT_URL = "https://connect.garmin.com/modern";
     private static final String CONNECT_API_URL = "https://connectapi.garmin.com";
+    private static final int WELLNESS_BUCKET_MINUTES = 5;
 
     private final String username;
     private final String password;
@@ -74,6 +83,18 @@ public class GarminHttpClient implements GarminClientPort {
             LocalDate date = today.minusDays(i);
             logger.info("Fetching Garmin metrics for {}...", date);
             list.add(getMetricsForDate(date));
+        }
+        return list;
+    }
+
+    @Override
+    public List<GarminWellnessSample> getWellnessSamplesForLastDays(int days) throws IOException {
+        List<GarminWellnessSample> list = new ArrayList<>();
+        LocalDate today = LocalDate.now();
+        for (int i = 0; i < days; i++) {
+            LocalDate date = today.minusDays(i);
+            logger.info("Fetching Garmin stress/HR samples for {}...", date);
+            list.addAll(getWellnessSamplesForDate(date));
         }
         return list;
     }
@@ -292,11 +313,497 @@ public class GarminHttpClient implements GarminClientPort {
                 }
             }
 
+            try {
+                String hrvPath = "/hrv-service/hrv/" + dateStr;
+                String hrvResponse = executeRequest(hrvPath);
+                JsonNode hrvNode = objectMapper.readTree(hrvResponse);
+                Double hrvValue = extractHrvValue(hrvNode);
+                if (hrvValue != null) {
+                    metrics.setHrv(hrvValue);
+                }
+            } catch (Exception e) {
+                logger.debug("HRV fetch failed for {}: {}", dateStr, e.getMessage());
+            }
+
         } catch (Exception e) {
             logger.warn("Error fetching some Garmin metrics for {}: {}", dateStr, e.getMessage());
         }
 
         return metrics;
+    }
+
+    private Double extractHrvValue(JsonNode root) {
+        if (root == null || root.isNull() || root.isMissingNode()) {
+            return null;
+        }
+
+        Double direct = readFirstNumeric(root,
+                "lastNightAvg", "overnightAvg", "hrvValue", "dailyAvg", "dailyHrv",
+                "avgHrv", "averageHrv", "rmssdAvg", "rmssdAverage", "rmssd", "hrv");
+        if (direct != null) {
+            return direct;
+        }
+
+        String[] nestedKeys = {"hrvSummary", "summary", "data", "hrvStatus", "lastNight"};
+        for (String key : nestedKeys) {
+            JsonNode nested = root.get(key);
+            Double nestedValue = extractHrvValue(nested);
+            if (nestedValue != null) {
+                return nestedValue;
+            }
+        }
+
+        Double series = averageFromSeries(root.get("hrvValuesArray"));
+        if (series != null) {
+            return series;
+        }
+        series = averageFromSeries(root.get("hrvValues"));
+        if (series != null) {
+            return series;
+        }
+        series = averageFromSeries(root.get("rmssdValues"));
+        if (series != null) {
+            return series;
+        }
+        series = averageFromSeries(root.get("values"));
+        if (series != null) {
+            return series;
+        }
+
+        if (root.isArray()) {
+            return averageFromSeries(root);
+        }
+
+        return null;
+    }
+
+    private Double readFirstNumeric(JsonNode node, String... keys) {
+        if (node == null || keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (key == null) {
+                continue;
+            }
+            JsonNode value = node.get(key);
+            if (value != null && value.isNumber()) {
+                return value.asDouble();
+            }
+        }
+        return null;
+    }
+
+    private Double averageFromSeries(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return null;
+        }
+        double total = 0.0;
+        int count = 0;
+        for (JsonNode entry : node) {
+            Double value = null;
+            if (entry.isArray() && entry.size() > 1 && entry.get(1).isNumber()) {
+                value = entry.get(1).asDouble();
+            } else if (entry.isObject()) {
+                value = readFirstNumeric(entry, "value", "hrvValue", "rmssd", "hrv");
+            } else if (entry.isNumber()) {
+                value = entry.asDouble();
+            }
+            if (value != null) {
+                total += value;
+                count++;
+            }
+        }
+        if (count == 0) {
+            return null;
+        }
+        return total / count;
+    }
+
+    private List<GarminWellnessSample> getWellnessSamplesForDate(LocalDate date) throws IOException {
+        String dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE);
+        Map<Long, Integer> stressSeries = new HashMap<>();
+        Map<Long, Integer> heartRateSeries = new HashMap<>();
+
+        try {
+            String stressPath = "/wellness-service/wellness/dailyStress/" + dateStr;
+            String stressResponse = executeRequest(stressPath);
+            JsonNode stressNode = objectMapper.readTree(stressResponse);
+            stressSeries = parseSeries(stressNode, date,
+                    "stressValuesArray", "stressValues", "valuesArray", "values", "stress");
+        } catch (Exception e) {
+            logger.debug("Stress series fetch failed for {}: {}", dateStr, e.getMessage());
+        }
+
+        if (this.displayName != null) {
+            try {
+                String hrPath = "/wellness-service/wellness/dailyHeartRate/" + this.displayName + "?date=" + dateStr;
+                String hrResponse = executeRequest(hrPath);
+                JsonNode hrNode = objectMapper.readTree(hrResponse);
+                heartRateSeries = parseSeries(hrNode, date,
+                        "heartRateValuesArray", "heartRateValues", "hrValuesArray", "hrValues", "values");
+            } catch (Exception e) {
+                logger.debug("Heart rate series fetch failed for {}: {}", dateStr, e.getMessage());
+            }
+        } else {
+            logger.debug("Skipping heart rate series for {}: display name missing.", dateStr);
+        }
+
+        if (stressSeries.isEmpty() && heartRateSeries.isEmpty()) {
+            return List.of();
+        }
+
+        return bucketWellnessSamples(stressSeries, heartRateSeries);
+    }
+
+    private Map<Long, Integer> parseSeries(JsonNode root, LocalDate date, String... keys) {
+        if (root == null) {
+            return Map.of();
+        }
+        JsonNode seriesNode = findSeriesNode(root, keys);
+        if (seriesNode == null) {
+            seriesNode = findFirstSeriesNode(root);
+        }
+        return readSeries(seriesNode, root, date);
+    }
+
+    private Map<Long, Integer> readSeries(JsonNode seriesNode, JsonNode root, LocalDate date) {
+        if (seriesNode == null || !seriesNode.isArray()) {
+            return Map.of();
+        }
+        long baseEpochMs = resolveBaseEpochMs(root, date);
+        Map<Long, Integer> series = new HashMap<>();
+        for (JsonNode entry : seriesNode) {
+            Long timestamp = extractTimestamp(entry, baseEpochMs);
+            Integer value = extractSeriesValue(entry);
+            if (timestamp == null || value == null || value < 0) {
+                continue;
+            }
+            series.put(timestamp, value);
+        }
+        return series;
+    }
+
+    private JsonNode findSeriesNode(JsonNode root, String... keys) {
+        if (root == null || keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (key == null || key.isBlank()) {
+                continue;
+            }
+            JsonNode found = findSeriesNode(root, key);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    private JsonNode findSeriesNode(JsonNode root, String key) {
+        if (root == null || key == null) {
+            return null;
+        }
+        if (root.isObject()) {
+            JsonNode direct = root.get(key);
+            if (direct != null && direct.isArray()) {
+                return direct;
+            }
+            java.util.Iterator<JsonNode> elements = root.elements();
+            while (elements.hasNext()) {
+                JsonNode found = findSeriesNode(elements.next(), key);
+                if (found != null) {
+                    return found;
+                }
+            }
+        } else if (root.isArray()) {
+            for (JsonNode child : root) {
+                JsonNode found = findSeriesNode(child, key);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private JsonNode findFirstSeriesNode(JsonNode root) {
+        if (root == null) {
+            return null;
+        }
+        if (root.isArray()) {
+            if (looksLikeSeries(root)) {
+                return root;
+            }
+            for (JsonNode child : root) {
+                JsonNode found = findFirstSeriesNode(child);
+                if (found != null) {
+                    return found;
+                }
+            }
+            return null;
+        }
+        if (root.isObject()) {
+            java.util.Iterator<JsonNode> elements = root.elements();
+            while (elements.hasNext()) {
+                JsonNode child = elements.next();
+                if (child.isArray() && looksLikeSeries(child)) {
+                    return child;
+                }
+                JsonNode found = findFirstSeriesNode(child);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean looksLikeSeries(JsonNode node) {
+        if (node == null || !node.isArray() || node.isEmpty()) {
+            return false;
+        }
+        for (JsonNode entry : node) {
+            if (entry.isArray() && entry.size() > 1 && entry.get(0).isNumber() && entry.get(1).isNumber()) {
+                return true;
+            }
+            if (entry.isObject()) {
+                Long timestamp = readFirstLong(entry, "timestamp", "timestampLocal", "timestampGMT", "time", "ts");
+                Double value = readFirstNumeric(entry, "value", "stress", "stressLevel", "heartRate", "hr", "bpm");
+                if (timestamp != null && value != null) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private Long extractTimestamp(JsonNode entry, long baseEpochMs) {
+        if (entry == null || entry.isNull()) {
+            return null;
+        }
+        if (entry.isArray() && entry.size() > 0) {
+            JsonNode tsNode = entry.get(0);
+            if (tsNode.isNumber()) {
+                return toEpochMillis(tsNode.asLong(), baseEpochMs);
+            }
+            return null;
+        }
+        if (entry.isObject()) {
+            Long direct = readFirstLong(entry,
+                    "timestamp", "timestampLocal", "timestampGMT", "timeOffset",
+                    "timeOffsetMillis", "startTimeInSeconds", "startTimeInMillis",
+                    "timeInSeconds", "timeInMillis", "time", "ts");
+            if (direct != null) {
+                return toEpochMillis(direct, baseEpochMs);
+            }
+        }
+        if (entry.isNumber()) {
+            return toEpochMillis(entry.asLong(), baseEpochMs);
+        }
+        return null;
+    }
+
+    private Integer extractSeriesValue(JsonNode entry) {
+        if (entry == null || entry.isNull()) {
+            return null;
+        }
+        if (entry.isArray() && entry.size() > 1 && entry.get(1).isNumber()) {
+            return (int) Math.round(entry.get(1).asDouble());
+        }
+        if (entry.isObject()) {
+            Double value = readFirstNumeric(entry, "value", "stress", "stressLevel", "heartRate", "hr", "bpm", "beatsPerMinute");
+            if (value != null) {
+                return (int) Math.round(value);
+            }
+        }
+        if (entry.isNumber()) {
+            return (int) Math.round(entry.asDouble());
+        }
+        return null;
+    }
+
+    private Long readFirstLong(JsonNode node, String... keys) {
+        if (node == null || keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (key == null) {
+                continue;
+            }
+            JsonNode value = node.get(key);
+            if (value != null && value.isNumber()) {
+                return value.asLong();
+            }
+        }
+        return null;
+    }
+
+    private String readFirstText(JsonNode node, String... keys) {
+        if (node == null || keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (key == null) {
+                continue;
+            }
+            JsonNode value = node.get(key);
+            if (value != null && value.isTextual()) {
+                return value.asText();
+            }
+        }
+        return null;
+    }
+
+    private long resolveBaseEpochMs(JsonNode root, LocalDate date) {
+        Long base = readFirstLong(root, "startTimestampLocal", "startTimestampGMT", "startTimestamp", "startTime");
+        if (base != null) {
+            Long normalized = normalizeEpochMillis(base);
+            if (normalized != null) {
+                return normalized;
+            }
+        }
+        String baseText = readFirstText(root, "startTimestampLocal", "startTimestampGMT", "startTime", "calendarDate");
+        Long parsed = parseTimestampText(baseText);
+        if (parsed != null) {
+            return parsed;
+        }
+        return date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
+    }
+
+    private Long normalizeEpochMillis(long value) {
+        if (value <= 0) {
+            return null;
+        }
+        if (value >= 1_000_000_000_000L) {
+            return value;
+        }
+        if (value >= 1_000_000_000L) {
+            return value * 1000L;
+        }
+        return null;
+    }
+
+    private Long parseTimestampText(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(text).toInstant().toEpochMilli();
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            return Instant.parse(text).toEpochMilli();
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            return LocalDateTime.parse(text).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            return LocalDate.parse(text).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        } catch (DateTimeParseException ignored) {
+        }
+        return null;
+    }
+
+    private Long toEpochMillis(long raw, long baseEpochMs) {
+        if (raw <= 0) {
+            return null;
+        }
+        if (raw >= 1_000_000_000_000L) {
+            return raw;
+        }
+        if (raw >= 1_000_000_000L) {
+            return raw * 1000L;
+        }
+        if (raw <= 86_400L) {
+            return baseEpochMs + raw * 1000L;
+        }
+        if (raw <= 86_400_000L) {
+            return baseEpochMs + raw;
+        }
+        return baseEpochMs + raw * 1000L;
+    }
+
+    private List<GarminWellnessSample> bucketWellnessSamples(Map<Long, Integer> stressSeries,
+                                                             Map<Long, Integer> heartRateSeries) {
+        long bucketSizeMs = WELLNESS_BUCKET_MINUTES * 60_000L;
+        Map<Long, Bucket> buckets = new TreeMap<>();
+        addSeriesToBuckets(buckets, stressSeries, bucketSizeMs, true);
+        addSeriesToBuckets(buckets, heartRateSeries, bucketSizeMs, false);
+
+        if (buckets.isEmpty()) {
+            return List.of();
+        }
+
+        ZoneId zone = ZoneId.systemDefault();
+        List<GarminWellnessSample> samples = new ArrayList<>();
+        for (Map.Entry<Long, Bucket> entry : buckets.entrySet()) {
+            long bucketStart = entry.getKey();
+            Bucket bucket = entry.getValue();
+            GarminWellnessSample sample = new GarminWellnessSample();
+            sample.setDate(Instant.ofEpochMilli(bucketStart).atZone(zone).toLocalDate().toString());
+            sample.setTimestamp(formatTimestamp(bucketStart, zone));
+            sample.setStress(bucket.getStressAverage());
+            sample.setHeartRate(bucket.getHeartRateAverage());
+            samples.add(sample);
+        }
+        return samples;
+    }
+
+    private void addSeriesToBuckets(Map<Long, Bucket> buckets,
+                                    Map<Long, Integer> series,
+                                    long bucketSizeMs,
+                                    boolean isStress) {
+        if (series == null || series.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<Long, Integer> entry : series.entrySet()) {
+            long timestamp = entry.getKey();
+            int value = entry.getValue();
+            long bucketStart = (timestamp / bucketSizeMs) * bucketSizeMs;
+            Bucket bucket = buckets.computeIfAbsent(bucketStart, key -> new Bucket());
+            if (isStress) {
+                bucket.addStress(value);
+            } else {
+                bucket.addHeartRate(value);
+            }
+        }
+    }
+
+    private String formatTimestamp(long epochMs, ZoneId zone) {
+        return Instant.ofEpochMilli(epochMs).atZone(zone).toLocalDateTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+    }
+
+    private static final class Bucket {
+        private int stressTotal;
+        private int stressCount;
+        private int heartRateTotal;
+        private int heartRateCount;
+
+        void addStress(int value) {
+            stressTotal += value;
+            stressCount++;
+        }
+
+        void addHeartRate(int value) {
+            heartRateTotal += value;
+            heartRateCount++;
+        }
+
+        Integer getStressAverage() {
+            if (stressCount == 0) {
+                return null;
+            }
+            return Math.round((float) stressTotal / stressCount);
+        }
+
+        Integer getHeartRateAverage() {
+            if (heartRateCount == 0) {
+                return null;
+            }
+            return Math.round((float) heartRateTotal / heartRateCount);
+        }
     }
 
     private String executeRequest(String path) throws IOException {

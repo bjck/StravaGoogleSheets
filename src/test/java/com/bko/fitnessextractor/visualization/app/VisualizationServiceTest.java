@@ -50,13 +50,19 @@ class VisualizationServiceTest {
                 List.of("2", "Evening Run", "Run", "5000", "1500", "1600", "2025-01-12")
         );
         List<List<Object>> garminRows = List.of(
-                List.of("Date", "Body Battery Max", "Body Battery Min", "Weight (kg)", "VO2 Max", "Resting HR", "Sleep Score", "Sleep Duration (h)"),
-                List.of("2025-01-11", "80", "20", "70.5", "52", "48", "75", "7.5"),
-                List.of("2025-01-12", "78", "25", "70.4", "52", "47", "80", "8.0")
+                List.of("Date", "Body Battery Max", "Body Battery Min", "Weight (kg)", "VO2 Max", "Resting HR", "Sleep Score", "Sleep Duration (h)", "HRV (ms)"),
+                List.of("2025-01-11", "80", "20", "70.5", "52", "48", "75", "7.5", "62"),
+                List.of("2025-01-12", "78", "25", "70.4", "52", "47", "80", "8.0", "64")
+        );
+        List<List<Object>> stressRows = List.of(
+                List.of("Date", "Timestamp", "Stress", "Heart Rate"),
+                List.of("2025-01-12", "2025-01-12T00:10:00", "35", "60"),
+                List.of("2025-01-12", "2025-01-12T00:35:00", "20", "55")
         );
 
         when(spreadsheetPort.getExistingValues("Strava Activities!A:P")).thenReturn(stravaRows);
-        when(spreadsheetPort.getExistingValues("Garmin Metrics!A:H")).thenReturn(garminRows);
+        when(spreadsheetPort.getExistingValues("Garmin Metrics!A:I")).thenReturn(garminRows);
+        when(spreadsheetPort.getExistingValues("Garmin Stress HR!A:D")).thenReturn(stressRows);
 
         VisualizationService service = new VisualizationService(spreadsheetPort, settings);
 
@@ -76,5 +82,10 @@ class VisualizationServiceTest {
         assertEquals(47, snapshot.garmin().restingHeartRate());
         assertEquals(List.of("2025-01-11", "2025-01-12"), snapshot.garmin().chartLabels());
         assertEquals(List.of(80, 78), snapshot.garmin().bodyBatteryMaxSeries());
+
+        assertNotNull(snapshot.recovery());
+        assertEquals("2025-01-12 - Evening Run", snapshot.recovery().workoutLabel());
+        assertEquals(8, snapshot.recovery().minutesToRecovery());
+        assertEquals("Recovered", snapshot.recovery().status());
     }
 }

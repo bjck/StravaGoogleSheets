@@ -244,6 +244,12 @@ main {
     color: #2a241e;
 }
 
+.stat-note {
+    font-size: 0.85rem;
+    color: #6e5f52;
+    line-height: 1.4;
+}
+
 .chart-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -261,9 +267,16 @@ main {
     animation: fadeUp 0.6s ease both;
 }
 
-.chart-card canvas {
-    width: 100%;
+.chart-frame {
     height: 280px;
+    min-height: 280px;
+    max-height: 280px;
+}
+
+.chart-frame canvas {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
 }
 
 .chart-header h3 {

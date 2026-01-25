@@ -11,6 +11,7 @@ public class GarminMetrics {
     private Double weight;
     private Double vo2Max;
     private Integer restingHeartRate;
+    private Double hrv;
     private Integer sleepScore;
     private Double sleepDurationHours;
 
@@ -32,6 +33,9 @@ public class GarminMetrics {
     public Integer getRestingHeartRate() { return restingHeartRate; }
     public void setRestingHeartRate(Integer restingHeartRate) { this.restingHeartRate = restingHeartRate; }
 
+    public Double getHrv() { return hrv; }
+    public void setHrv(Double hrv) { this.hrv = hrv; }
+
     public Integer getSleepScore() { return sleepScore; }
     public void setSleepScore(Integer sleepScore) { this.sleepScore = sleepScore; }
 
@@ -47,14 +51,15 @@ public class GarminMetrics {
             vo2Max != null ? vo2Max : "",
             restingHeartRate != null ? restingHeartRate : "",
             sleepScore != null ? sleepScore : "",
-            sleepDurationHours != null ? sleepDurationHours : ""
+            sleepDurationHours != null ? sleepDurationHours : "",
+            hrv != null ? hrv : ""
         );
     }
 
     public static List<Object> getHeaders() {
         return List.of(
             "Date", "Body Battery Max", "Body Battery Min", "Weight (kg)",
-            "VO2 Max", "Resting HR", "Sleep Score", "Sleep Duration (h)"
+            "VO2 Max", "Resting HR", "Sleep Score", "Sleep Duration (h)", "HRV (ms)"
         );
     }
 }

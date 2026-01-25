@@ -111,13 +111,44 @@
                 </div>
             </section>
 
+            <section class="summary-block">
+                <div class="summary-header">
+                    <h3>Recovery check</h3>
+                    <p>Time to return to stress 25 or lower after the latest Strava workout.</p>
+                </div>
+                <div class="summary-grid">
+                    <div class="stat-card">
+                        <span class="stat-label">Last workout</span>
+                        <div class="stat-text" th:text="${dashboard.recovery != null ? dashboard.recovery.workoutLabel : '--'}">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Workout end</span>
+                        <div class="stat-text" th:text="${dashboard.recovery != null ? dashboard.recovery.workoutEndTimestamp : '--'}">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Recovery time</span>
+                        <div class="stat-value">
+                            <span th:text="${dashboard.recovery != null && dashboard.recovery.minutesToRecovery != null ? dashboard.recovery.minutesToRecovery : '--'}">--</span>
+                            <span class="stat-unit" th:if="${dashboard.recovery != null && dashboard.recovery.minutesToRecovery != null}">min</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Status</span>
+                        <div class="stat-text" th:text="${dashboard.recovery != null ? dashboard.recovery.status : '--'}">--</div>
+                        <div class="stat-note" th:text="${dashboard.recovery != null ? dashboard.recovery.guidance : ''}"></div>
+                    </div>
+                </div>
+            </section>
+
             <div class="chart-grid">
                 <div class="chart-card" th:if="${dashboard.strava != null}">
                     <div class="chart-header">
                         <h3>Strava distance trend</h3>
                         <p>Most recent activities in kilometers.</p>
                     </div>
-                    <canvas id="stravaChart"></canvas>
+                    <div class="chart-frame">
+                        <canvas id="stravaChart"></canvas>
+                    </div>
                     <div class="type-list" th:if="${dashboard.strava.typeCounts != null and !dashboard.strava.typeCounts.isEmpty()}">
                         <div class="type-pill" th:each="entry : ${dashboard.strava.typeCounts}">
                             <span th:text="${entry.key}">Type</span>
@@ -135,7 +166,9 @@
                         <h3>Garmin recovery trend</h3>
                         <p>Body battery, sleep score, and resting heart rate.</p>
                     </div>
-                    <canvas id="garminChart"></canvas>
+                    <div class="chart-frame">
+                        <canvas id="garminChart"></canvas>
+                    </div>
                 </div>
                 <div class="chart-card empty" th:unless="${dashboard.garmin != null}">
                     <h3>Garmin data not available</h3>
@@ -165,16 +198,51 @@
     const garminBodyBattery = [[${dashboard.garmin?.bodyBatteryMaxSeries}]] || [];
     const garminSleepScores = [[${dashboard.garmin?.sleepScoreSeries}]] || [];
     const garminRestingHr = [[${dashboard.garmin?.restingHeartRateSeries}]] || [];
+    const MAX_CHART_POINTS = 60;
+
+    const alignSeries = (labels, seriesList) => {
+        if (!labels || !seriesList || seriesList.length === 0) {
+            return { labels: [], seriesList: [] };
+        }
+        const minLength = Math.min(labels.length, ...seriesList.map(series => series.length));
+        if (minLength <= 0) {
+            return { labels: [], seriesList: [] };
+        }
+        return {
+            labels: labels.slice(0, minLength),
+            seriesList: seriesList.map(series => series.slice(0, minLength))
+        };
+    };
+
+    const downsampleSeries = (labels, seriesList, maxPoints) => {
+        if (!labels || labels.length <= maxPoints) {
+            return { labels, seriesList };
+        }
+        const stride = Math.ceil(labels.length / maxPoints);
+        const sampledLabels = [];
+        const sampledSeries = seriesList.map(() => []);
+        for (let i = 0; i < labels.length; i += stride) {
+            sampledLabels.push(labels[i]);
+            seriesList.forEach((series, idx) => {
+                sampledSeries[idx].push(series[i]);
+            });
+        }
+        return { labels: sampledLabels, seriesList: sampledSeries };
+    };
 
     const stravaCanvas = document.getElementById("stravaChart");
     if (stravaCanvas && stravaLabels.length) {
+        const aligned = alignSeries(stravaLabels, [stravaDistances]);
+        const sampled = downsampleSeries(aligned.labels, aligned.seriesList, MAX_CHART_POINTS);
+        const sampledLabels = sampled.labels;
+        const sampledDistances = sampled.seriesList[0] || [];
         new Chart(stravaCanvas, {
             type: "line",
             data: {
-                labels: stravaLabels,
+                labels: sampledLabels,
                 datasets: [{
                     label: "Distance (km)",
-                    data: stravaDistances,
+                    data: sampledDistances,
                     borderColor: "#d1793d",
                     backgroundColor: "rgba(209, 121, 61, 0.2)",
                     fill: true,
@@ -191,6 +259,12 @@
                     }
                 },
                 scales: {
+                    x: {
+                        ticks: {
+                            autoSkip: true,
+                            maxTicksLimit: 8
+                        }
+                    },
                     y: {
                         beginAtZero: true
                     }
@@ -201,14 +275,20 @@
 
     const garminCanvas = document.getElementById("garminChart");
     if (garminCanvas && garminLabels.length) {
+        const aligned = alignSeries(garminLabels, [garminBodyBattery, garminSleepScores, garminRestingHr]);
+        const sampled = downsampleSeries(aligned.labels, aligned.seriesList, MAX_CHART_POINTS);
+        const sampledLabels = sampled.labels;
+        const sampledBodyBattery = sampled.seriesList[0] || [];
+        const sampledSleepScores = sampled.seriesList[1] || [];
+        const sampledRestingHr = sampled.seriesList[2] || [];
         new Chart(garminCanvas, {
             type: "line",
             data: {
-                labels: garminLabels,
+                labels: sampledLabels,
                 datasets: [
                     {
                         label: "Body Battery Max",
-                        data: garminBodyBattery,
+                        data: sampledBodyBattery,
                         borderColor: "#2f3b2e",
                         backgroundColor: "rgba(47, 59, 46, 0.2)",
                         tension: 0.35,
@@ -217,7 +297,7 @@
                     },
                     {
                         label: "Sleep Score",
-                        data: garminSleepScores,
+                        data: sampledSleepScores,
                         borderColor: "#2bb673",
                         backgroundColor: "rgba(43, 182, 115, 0.2)",
                         tension: 0.35,
@@ -226,7 +306,7 @@
                     },
                     {
                         label: "Resting HR",
-                        data: garminRestingHr,
+                        data: sampledRestingHr,
                         borderColor: "#d1793d",
                         backgroundColor: "rgba(209, 121, 61, 0.25)",
                         tension: 0.35,
@@ -244,6 +324,12 @@
                     }
                 },
                 scales: {
+                    x: {
+                        ticks: {
+                            autoSkip: true,
+                            maxTicksLimit: 8
+                        }
+                    },
                     y: {
                         beginAtZero: true,
                         max: 100

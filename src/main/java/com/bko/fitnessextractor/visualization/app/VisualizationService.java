@@ -6,10 +6,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -25,8 +29,12 @@ public class VisualizationService implements com.bko.fitnessextractor.visualizat
     private static final Logger logger = LoggerFactory.getLogger(VisualizationService.class);
     private static final String STRAVA_SHEET = "Strava Activities";
     private static final String GARMIN_SHEET = "Garmin Metrics";
+    private static final String GARMIN_STRESS_SHEET = "Garmin Stress HR";
     private static final int STRAVA_RECENT_LIMIT = 16;
     private static final int GARMIN_RECENT_LIMIT = 30;
+    private static final int RECOVERY_STRESS_THRESHOLD = 25;
+    private static final int OVERTRAINING_MINUTES = 120;
+    private static final int STILL_STRESSED_MINUTES = 240;
 
     private final SpreadsheetPort spreadsheetPort;
     private final AppSettings settings;
@@ -41,14 +49,17 @@ public class VisualizationService implements com.bko.fitnessextractor.visualizat
         List<String> messages = new ArrayList<>();
         StravaSummary strava = null;
         GarminSummary garmin = null;
+        RecoverySummary recovery = null;
+        List<List<Object>> stravaRows = null;
+        List<List<Object>> stressRows = null;
 
         if (!settings.isGoogleConfigured()) {
             messages.add("Missing Google configuration. Check GOOGLE_SPREADSHEET_ID and GOOGLE_SERVICE_ACCOUNT_KEY_PATH.");
-            return new VisualizationSnapshot(List.copyOf(messages), null, null);
+            return new VisualizationSnapshot(List.copyOf(messages), null, null, null);
         }
 
         try {
-            List<List<Object>> stravaRows = spreadsheetPort.getExistingValues(STRAVA_SHEET + "!A:P");
+            stravaRows = spreadsheetPort.getExistingValues(STRAVA_SHEET + "!A:P");
             strava = buildStravaSummary(stravaRows);
             if (strava == null) {
                 messages.add("No Strava data found in the spreadsheet.");
@@ -59,7 +70,7 @@ public class VisualizationService implements com.bko.fitnessextractor.visualizat
         }
 
         try {
-            List<List<Object>> garminRows = spreadsheetPort.getExistingValues(GARMIN_SHEET + "!A:H");
+            List<List<Object>> garminRows = spreadsheetPort.getExistingValues(GARMIN_SHEET + "!A:I");
             garmin = buildGarminSummary(garminRows);
             if (garmin == null) {
                 messages.add("No Garmin data found in the spreadsheet.");
@@ -69,7 +80,21 @@ public class VisualizationService implements com.bko.fitnessextractor.visualizat
             messages.add("Could not load Garmin data: " + e.getMessage());
         }
 
-        return new VisualizationSnapshot(List.copyOf(messages), strava, garmin);
+        try {
+            stressRows = spreadsheetPort.getExistingValues(GARMIN_STRESS_SHEET + "!A:D");
+        } catch (Exception e) {
+            logger.warn("Failed to load Garmin stress data", e);
+            messages.add("Could not load Garmin stress data: " + e.getMessage());
+        }
+
+        try {
+            recovery = buildRecoverySummary(stravaRows, stressRows);
+        } catch (Exception e) {
+            logger.warn("Failed to calculate recovery summary", e);
+            messages.add("Could not calculate recovery summary: " + e.getMessage());
+        }
+
+        return new VisualizationSnapshot(List.copyOf(messages), strava, garmin, recovery);
     }
 
     private StravaSummary buildStravaSummary(List<List<Object>> rows) {
@@ -226,6 +251,63 @@ public class VisualizationService implements com.bko.fitnessextractor.visualizat
         );
     }
 
+    private RecoverySummary buildRecoverySummary(List<List<Object>> stravaRows, List<List<Object>> stressRows) {
+        WorkoutSummary workout = findLatestWorkout(stravaRows);
+        if (workout == null) {
+            return new RecoverySummary("No recent workout", "", null, "No workout", "Sync Strava to compute recovery.");
+        }
+
+        if (stressRows == null || stressRows.size() < 2) {
+            return new RecoverySummary(workout.label(), formatInstant(workout.end()), null,
+                    "No stress data", "Sync Garmin stress data to compute recovery.");
+        }
+
+        List<StressSample> samples = parseStressSamples(stressRows);
+        if (samples.isEmpty()) {
+            return new RecoverySummary(workout.label(), formatInstant(workout.end()), null,
+                    "No stress data", "Sync Garmin stress data to compute recovery.");
+        }
+
+        List<StressSample> afterWorkout = new ArrayList<>();
+        for (StressSample sample : samples) {
+            if (!sample.timestamp().isBefore(workout.end())) {
+                afterWorkout.add(sample);
+            }
+        }
+        if (afterWorkout.isEmpty()) {
+            return new RecoverySummary(workout.label(), formatInstant(workout.end()), null,
+                    "No stress data", "No stress samples after the workout end time.");
+        }
+
+        StressSample recoveryPoint = null;
+        for (StressSample sample : afterWorkout) {
+            if (sample.stressLevel() != null
+                    && sample.stressLevel() > 0
+                    && sample.stressLevel() <= RECOVERY_STRESS_THRESHOLD) {
+                recoveryPoint = sample;
+                break;
+            }
+        }
+
+        if (recoveryPoint != null) {
+            long minutesToRecovery = Duration.between(workout.end(), recoveryPoint.timestamp()).toMinutes();
+            boolean overtraining = minutesToRecovery > OVERTRAINING_MINUTES;
+            String status = overtraining ? "Overtraining" : "Recovered";
+            String guidance = overtraining
+                    ? "Rest tonight."
+                    : "Numbers look promising. You are going to make it.";
+            return new RecoverySummary(workout.label(), formatInstant(workout.end()),
+                    (int) minutesToRecovery, status, guidance);
+        }
+
+        StressSample lastSample = afterWorkout.get(afterWorkout.size() - 1);
+        long minutesObserved = Duration.between(workout.end(), lastSample.timestamp()).toMinutes();
+        String guidance = minutesObserved >= STILL_STRESSED_MINUTES
+                ? "Stress stayed above 25 for more than 4 hours."
+                : "Still stressed. More data needed.";
+        return new RecoverySummary(workout.label(), formatInstant(workout.end()), null, "Still stressed", guidance);
+    }
+
     private Map<String, Integer> toHeaderIndex(List<Object> headerRow) {
         Map<String, Integer> index = new HashMap<>();
         if (headerRow == null) {
@@ -284,6 +366,45 @@ public class VisualizationService implements com.bko.fitnessextractor.visualizat
         return parsed == null ? null : (int) Math.round(parsed);
     }
 
+    private Instant parseInstant(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = value.toString().trim();
+        if (text.isEmpty()) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(text).toInstant();
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            return Instant.parse(text);
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            return LocalDateTime.parse(text).atZone(ZoneId.systemDefault()).toInstant();
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            return LocalDate.parse(text).atStartOfDay(ZoneId.systemDefault()).toInstant();
+        } catch (DateTimeParseException ignored) {
+        }
+        if (text.length() >= 19) {
+            try {
+                return LocalDateTime.parse(text.substring(0, 19)).atZone(ZoneId.systemDefault()).toInstant();
+            } catch (DateTimeParseException ignored) {
+            }
+        }
+        if (text.length() >= 10) {
+            try {
+                return LocalDate.parse(text.substring(0, 10)).atStartOfDay(ZoneId.systemDefault()).toInstant();
+            } catch (DateTimeParseException ignored) {
+            }
+        }
+        return null;
+    }
+
     private LocalDate parseDate(Object value) {
         if (value == null) {
             return null;
@@ -312,6 +433,69 @@ public class VisualizationService implements com.bko.fitnessextractor.visualizat
             }
         }
         return null;
+    }
+
+    private WorkoutSummary findLatestWorkout(List<List<Object>> rows) {
+        if (rows == null || rows.size() < 2) {
+            return null;
+        }
+        Map<String, Integer> headerIndex = toHeaderIndex(rows.get(0));
+        int nameIndex = getIndex(headerIndex, "Name", 1);
+        int startIndex = getIndex(headerIndex, "Start Date", 6);
+        int elapsedIndex = getIndex(headerIndex, "Elapsed Time (s)", 5);
+        int movingIndex = getIndex(headerIndex, "Moving Time (s)", 4);
+
+        WorkoutSummary latest = null;
+        for (int i = 1; i < rows.size(); i++) {
+            List<Object> row = rows.get(i);
+            Instant start = parseInstant(getCell(row, startIndex));
+            if (start == null) {
+                continue;
+            }
+            Integer elapsedSeconds = parseInteger(getCell(row, elapsedIndex));
+            if (elapsedSeconds == null || elapsedSeconds <= 0) {
+                elapsedSeconds = parseInteger(getCell(row, movingIndex));
+            }
+            if (elapsedSeconds == null || elapsedSeconds < 0) {
+                elapsedSeconds = 0;
+            }
+            Instant end = start.plusSeconds(elapsedSeconds);
+            String name = parseString(getCell(row, nameIndex));
+            String labelDate = end.atZone(ZoneId.systemDefault()).toLocalDate().toString();
+            String label = name.isBlank() ? labelDate + " - Activity" : labelDate + " - " + name;
+            if (latest == null || end.isAfter(latest.end())) {
+                latest = new WorkoutSummary(end, label);
+            }
+        }
+        return latest;
+    }
+
+    private List<StressSample> parseStressSamples(List<List<Object>> rows) {
+        if (rows == null || rows.size() < 2) {
+            return Collections.emptyList();
+        }
+        Map<String, Integer> headerIndex = toHeaderIndex(rows.get(0));
+        int timestampIndex = getIndex(headerIndex, "Timestamp", 1);
+        int stressIndex = getIndex(headerIndex, "Stress", 2);
+
+        List<StressSample> samples = new ArrayList<>();
+        for (int i = 1; i < rows.size(); i++) {
+            List<Object> row = rows.get(i);
+            Instant timestamp = parseInstant(getCell(row, timestampIndex));
+            Integer stress = parseInteger(getCell(row, stressIndex));
+            if (timestamp != null && stress != null) {
+                samples.add(new StressSample(timestamp, stress));
+            }
+        }
+        samples.sort(Comparator.comparing(StressSample::timestamp));
+        return samples;
+    }
+
+    private String formatInstant(Instant instant) {
+        if (instant == null) {
+            return "";
+        }
+        return instant.atZone(ZoneId.systemDefault()).toLocalDateTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
     }
 
     private double round(double value, int precision) {
@@ -355,6 +539,12 @@ public class VisualizationService implements com.bko.fitnessextractor.visualizat
     }
 
     private record StravaRow(LocalDate date, String name, String type, Double distanceMeters, Integer movingTimeSeconds) {
+    }
+
+    private record WorkoutSummary(Instant end, String label) {
+    }
+
+    private record StressSample(Instant timestamp, Integer stressLevel) {
     }
 
     private record GarminRow(LocalDate date,

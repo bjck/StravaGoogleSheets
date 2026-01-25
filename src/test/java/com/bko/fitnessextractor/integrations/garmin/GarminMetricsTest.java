@@ -25,6 +25,7 @@ class GarminMetricsTest {
         assertEquals("", row.get(5));
         assertEquals("", row.get(6));
         assertEquals(7.5, row.get(7));
+        assertEquals("", row.get(8));
     }
 
     @Test
@@ -32,7 +33,7 @@ class GarminMetricsTest {
         List<Object> headers = GarminMetrics.getHeaders();
         assertEquals(List.of(
                 "Date", "Body Battery Max", "Body Battery Min", "Weight (kg)",
-                "VO2 Max", "Resting HR", "Sleep Score", "Sleep Duration (h)"
+                "VO2 Max", "Resting HR", "Sleep Score", "Sleep Duration (h)", "HRV (ms)"
         ), headers);
     }
 }
