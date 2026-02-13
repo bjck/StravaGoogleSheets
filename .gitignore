@@ -34,6 +34,10 @@ build/
 
 ### VS Code ###
 .vscode/
+node_modules/
+ai-ui/node_modules/
+ai-ui/.vite/
+ai-ui/dist/
 
 ### Mac OS ###
 .DS_Store

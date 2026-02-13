@@ -14,7 +14,9 @@ public class EnvConfig {
     }
 
     public String get(String key) {
-        String envKey = key.toUpperCase().replace(".", "_");
+        String envKey = key.toUpperCase()
+                .replace(".", "_")
+                .replace("-", "_");
         String value = dotenv.get(envKey);
         if (value == null) {
             value = System.getenv(envKey);

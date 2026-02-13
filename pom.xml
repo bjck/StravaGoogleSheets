@@ -43,6 +43,17 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- Reactive stack for WebClient (Gemini) and SSE support -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+        <!-- Official Google GenAI client for Gemini (non-Vertex) -->
+        <dependency>
+            <groupId>com.google.genai</groupId>
+            <artifactId>google-genai</artifactId>
+            <version>0.4.0</version>
+        </dependency>
         <!-- Explicit Jackson annotations to satisfy compile-time references
              (typically brought transitively by spring-boot-starter-web/json) -->
         <dependency>

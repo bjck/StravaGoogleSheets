@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Console · Fitness Extractor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="background-layer"></div>
+<main>
+    <div class="container">
+        <section class="hero">
+            <div>
+                <span class="pill">AI</span>
+                <h1>AI Console</h1>
+                <p>Chat with Gemini and call MCP tools that surface your latest Strava and Garmin data from Sheets.</p>
+            </div>
+            <a class="button ghost" href="/">Back to console</a>
+        </section>
+
+        <section class="status-grid">
+            <div class="status-chip solid">
+                Default model
+                <span th:text="${defaultModel}"></span>
+            </div>
+            <div class="status-chip" id="context-status">
+                Fitness context
+                <span>Loading…</span>
+            </div>
+            <div class="status-chip" id="mcp-status">
+                MCP tools
+                <span>Loading…</span>
+            </div>
+        </section>
+
+        <section class="ai-grid">
+            <div class="card ai-panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="eyebrow">Direct Gemini</p>
+                        <h3>Chat</h3>
+                    </div>
+                </div>
+                <form id="chat-form" class="stack gap-sm">
+                    <label class="stack gap-2xs">
+                        <span class="label">Model</span>
+                        <div class="inline model-row">
+                            <select id="model-select"></select>
+                            <input id="model-input" name="model" th:value="${defaultModel}" placeholder="gemini-1.5-flash-latest" />
+                        </div>
+                    </label>
+                    <label class="stack gap-2xs">
+                        <span class="label">Message</span>
+                        <textarea id="chat-input" name="prompt" rows="4" placeholder="Ask anything about your training…"></textarea>
+                    </label>
+                    <div class="inline">
+                        <label class="toggle">
+                            <input type="checkbox" id="include-context" checked />
+                            <span>Include fitness context</span>
+                        </label>
+                        <button class="button primary" type="submit">Send to Gemini</button>
+                    </div>
+                </form>
+                <div class="subpanel">
+                    <div class="subpanel-head">
+                        <span>Responses</span>
+                        <button class="link" id="clear-log" type="button">Clear</button>
+                    </div>
+                    <div id="chat-log" class="log"></div>
+                </div>
+            </div>
+
+            <div class="card ai-panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="eyebrow">MCP</p>
+                        <h3>Tools</h3>
+                    </div>
+                    <button class="link" id="refresh-tools" type="button">Refresh</button>
+                </div>
+                <div class="stack gap-sm">
+                    <div class="pill-row" id="tool-list"></div>
+                    <div class="subpanel">
+                        <div class="subpanel-head">
+                            <span>Fitness summary</span>
+                            <button class="link" id="refresh-context" type="button">Reload</button>
+                        </div>
+                        <pre id="context-block" class="context-block">Loading…</pre>
+                    </div>
+                    <form id="mcp-form" class="stack gap-sm">
+                        <label class="stack gap-2xs">
+                            <span class="label">Ask via MCP (ask_gemini)</span>
+                            <textarea id="mcp-input" rows="3" placeholder="Ask Gemini through MCP…"></textarea>
+                        </label>
+                        <div class="inline">
+                            <label class="toggle">
+                                <input type="checkbox" id="mcp-include-context" checked />
+                                <span>Include context</span>
+                            </label>
+                            <button class="button" type="submit">Call MCP</button>
+                        </div>
+                    </form>
+                    <div class="subpanel">
+                        <div class="subpanel-head">
+                            <span>MCP output</span>
+                            <button class="link" id="clear-mcp-log" type="button">Clear</button>
+                        </div>
+                        <div id="mcp-log" class="log"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</main>
+
+<script>
+    const chatForm = document.getElementById('chat-form');
+    const chatInput = document.getElementById('chat-input');
+    const chatLog = document.getElementById('chat-log');
+    const includeContext = document.getElementById('include-context');
+    const modelInput = document.getElementById('model-input');
+    const modelSelect = document.getElementById('model-select');
+    const contextBlock = document.getElementById('context-block');
+    const contextStatus = document.getElementById('context-status').querySelector('span');
+    const mcpStatus = document.getElementById('mcp-status').querySelector('span');
+    const toolList = document.getElementById('tool-list');
+    const refreshToolsBtn = document.getElementById('refresh-tools');
+    const refreshContextBtn = document.getElementById('refresh-context');
+    const clearLogBtn = document.getElementById('clear-log');
+    const mcpForm = document.getElementById('mcp-form');
+    const mcpInput = document.getElementById('mcp-input');
+    const mcpLog = document.getElementById('mcp-log');
+    const clearMcpLogBtn = document.getElementById('clear-mcp-log');
+    const mcpIncludeContext = document.getElementById('mcp-include-context');
+
+    function appendLog(target, role, text) {
+        const entry = document.createElement('div');
+        entry.className = 'log-line';
+        entry.innerHTML = `<span class="log-role">${role}</span><span class="log-text">${escapeHtml(text)}</span>`;
+        target.prepend(entry);
+    }
+
+    function escapeHtml(str) {
+        return str.replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    async function loadContext() {
+        contextStatus.textContent = 'Loading…';
+        try {
+            const res = await fetch('/ai/context');
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            contextBlock.textContent = JSON.stringify(data, null, 2);
+            contextStatus.textContent = data && (data.strava || data.garmin || data.recovery) ? 'Ready' : 'Empty';
+        } catch (e) {
+            contextBlock.textContent = 'Failed to load context: ' + e.message;
+            contextStatus.textContent = 'Error';
+        }
+    }
+
+    async function loadTools() {
+        mcpStatus.textContent = 'Loading…';
+        try {
+            const res = await fetch('/mcp/tools');
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            toolList.innerHTML = '';
+            data.forEach(tool => {
+                const pill = document.createElement('span');
+                pill.className = 'tool-pill';
+                pill.textContent = tool.name;
+                pill.title = tool.description;
+                toolList.appendChild(pill);
+            });
+            mcpStatus.textContent = data.length + ' tools';
+        } catch (e) {
+            mcpStatus.textContent = 'Error';
+        }
+    }
+
+    chatForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const prompt = chatInput.value.trim();
+        if (!prompt) return;
+        appendLog(chatLog, 'you', prompt);
+        const model = modelSelect.value || modelInput.value;
+        try {
+            const res = await fetch('/ai/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    messages: [{ role: 'user', content: prompt }],
+                    includeContext: includeContext.checked,
+                    model
+                })
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            appendLog(chatLog, data.model || 'gemini', data.text || '(no text)');
+        } catch (err) {
+            appendLog(chatLog, 'error', err.message);
+        } finally {
+            chatInput.value = '';
+        }
+    });
+
+    mcpForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const prompt = mcpInput.value.trim();
+        if (!prompt) return;
+        appendLog(mcpLog, 'you', prompt);
+        const model = modelSelect.value || modelInput.value;
+        try {
+            const res = await fetch('/mcp/tools/ask_gemini', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt,
+                    includeContext: mcpIncludeContext.checked,
+                    model
+                })
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            appendLog(mcpLog, data.model || 'mcp', data.text || '(no text)');
+        } catch (err) {
+            appendLog(mcpLog, 'error', err.message);
+        } finally {
+            mcpInput.value = '';
+        }
+    });
+
+    refreshContextBtn.addEventListener('click', loadContext);
+    refreshToolsBtn.addEventListener('click', loadTools);
+    clearLogBtn.addEventListener('click', () => chatLog.innerHTML = '');
+    clearMcpLogBtn.addEventListener('click', () => mcpLog.innerHTML = '');
+
+    async function loadModels() {
+        modelSelect.innerHTML = '<option value=\"\">Loading…</option>';
+        try {
+            const res = await fetch('/ai/models');
+            if (!res.ok) throw new Error(await res.text());
+            const models = await res.json();
+            modelSelect.innerHTML = '';
+            models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.name;
+                opt.textContent = m.displayName || m.name;
+                modelSelect.appendChild(opt);
+            });
+            // keep default model text in sync if none selected
+            if (!modelSelect.value && modelInput.value) {
+                modelSelect.value = modelInput.value;
+            }
+        } catch (e) {
+            modelSelect.innerHTML = '<option value=\"\">Failed to load</option>';
+        }
+    }
+
+    loadContext();
+    loadTools();
+    loadModels();
+</script>
+</body>
+</html>
