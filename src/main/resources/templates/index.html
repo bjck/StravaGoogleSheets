@@ -60,10 +60,17 @@
                     </form>
                 </div>
                 <div class="card">
+                    <h3>Download CSV bundle</h3>
+                    <p>Export all three sheets as CSV files in a single zip for analysis.</p>
+                    <a class="button" href="/sync/export" th:if="${config.googleConfigured}">Download CSVs</a>
+                    <p th:unless="${config.googleConfigured}">Configure Google Sheets to enable exports.</p>
+                </div>
+                <div class="card">
                     <h3>Visualize Data</h3>
                     <p>Explore charts and trends from the Strava and Garmin tabs in your spreadsheet.</p>
                     <a class="button" href="/visualize">Open dashboard</a>
                 </div>
+                <!-- AI module removed -->
             </div>
 
             <section class="report" th:if="${report != null}">
