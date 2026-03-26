@@ -15,49 +15,76 @@ async function json<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T>
   return res.json() as Promise<T>;
 }
 
+// --- Types ---
+
 export type ChatMessageDto = { role: string; content: string };
-export type ChatResponseDto = { model: string; text: string; usedContext: boolean };
-export type FitnessContextDto = {
-  messages: string[];
-  strava?: Record<string, unknown>;
-  garmin?: Record<string, unknown>;
-  recovery?: Record<string, unknown>;
+
+export type ChatResponseDto = {
+  model: string;
+  text: string;
+  usedContext: boolean;
+  toolsUsed: string[];
 };
 
 export type ModelOption = { name: string; displayName: string; fullName: string };
+
+export type WorkoutStats = {
+  totalWorkouts: number;
+  activityTypes: string[];
+  earliestDate: string | null;
+  latestDate: string | null;
+  summaryByType: TypeSummary[];
+  latestGarmin?: {
+    date: string;
+    bodyBatteryMax: number | null;
+    restingHR: number | null;
+    vo2Max: number | null;
+    sleepScore: number | null;
+    weight: number | null;
+  };
+};
+
+export type TypeSummary = {
+  type: string;
+  count: number;
+  totalDistanceKm?: number;
+  totalHours?: number;
+};
+
+export type McpTool = { name: string; description: string };
+
+// --- API calls ---
 
 export async function fetchModels(): Promise<ModelOption[]> {
   return json<ModelOption[]>(`${base}/ai/models`);
 }
 
-export async function fetchContext(): Promise<FitnessContextDto> {
-  return json<FitnessContextDto>(`${base}/ai/context`);
+export async function fetchStats(): Promise<WorkoutStats> {
+  return json<WorkoutStats>(`${base}/ai/stats`);
 }
 
-export async function sendChat(prompt: string, model: string, includeContext: boolean): Promise<ChatResponseDto> {
+export async function sendChat(
+  messages: ChatMessageDto[],
+  model: string,
+  includeContext: boolean,
+): Promise<ChatResponseDto> {
   return json<ChatResponseDto>(`${base}/ai/chat`, {
     method: 'POST',
-    body: JSON.stringify({
-      messages: [{ role: 'user', content: prompt } satisfies ChatMessageDto],
-      includeContext,
-      model,
-    }),
+    body: JSON.stringify({ messages, includeContext, model }),
   });
 }
-
-export type McpTool = { name: string; description: string };
 
 export async function fetchTools(): Promise<McpTool[]> {
   return json<McpTool[]>(`${base}/mcp/tools`);
 }
 
-export async function fetchFitnessSummary(): Promise<unknown> {
-  return json(`${base}/mcp/tools/fitness_summary`, { method: 'POST' });
+export async function executeTool(toolName: string, args?: Record<string, unknown>): Promise<unknown> {
+  return json(`${base}/mcp/tools/${toolName}`, {
+    method: 'POST',
+    body: JSON.stringify(args || {}),
+  });
 }
 
-export async function askGeminiViaMcp(prompt: string, model: string, includeContext: boolean): Promise<unknown> {
-  return json(`${base}/mcp/tools/ask_gemini`, {
-    method: 'POST',
-    body: JSON.stringify({ prompt, model, includeContext }),
-  });
+export async function triggerSync(target: 'strava' | 'garmin' | 'all'): Promise<unknown> {
+  return json(`${base}/api/sync/${target}`, { method: 'POST' });
 }

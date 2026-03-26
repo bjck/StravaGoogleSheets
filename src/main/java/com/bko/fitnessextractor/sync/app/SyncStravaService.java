@@ -5,6 +5,7 @@ import com.bko.fitnessextractor.integrations.strava.StravaActivity;
 import com.bko.fitnessextractor.integrations.strava.StravaClientPort;
 import com.bko.fitnessextractor.shared.AppSettings;
 import com.bko.fitnessextractor.sync.SyncStravaUseCase;
+import com.bko.fitnessextractor.workout.WorkoutStorePort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -23,11 +24,14 @@ public class SyncStravaService implements SyncStravaUseCase {
     private final SpreadsheetPort spreadsheetPort;
     private final StravaClientPort stravaClientPort;
     private final AppSettings appSettings;
+    private final WorkoutStorePort workoutStore;
 
-    public SyncStravaService(SpreadsheetPort spreadsheetPort, StravaClientPort stravaClientPort, AppSettings appSettings) {
+    public SyncStravaService(SpreadsheetPort spreadsheetPort, StravaClientPort stravaClientPort,
+                             AppSettings appSettings, WorkoutStorePort workoutStore) {
         this.spreadsheetPort = spreadsheetPort;
         this.stravaClientPort = stravaClientPort;
         this.appSettings = appSettings;
+        this.workoutStore = workoutStore;
     }
 
     @Override
@@ -35,10 +39,6 @@ public class SyncStravaService implements SyncStravaUseCase {
         SyncReport report = new SyncReport();
         report.setStravaAttempted(true);
 
-        if (!appSettings.isGoogleConfigured()) {
-            report.error("Missing Google configuration. Check GOOGLE_SPREADSHEET_ID and GOOGLE_SERVICE_ACCOUNT_KEY_PATH.");
-            return report;
-        }
         if (!appSettings.isStravaConfigured()) {
             report.warn("Strava credentials missing, skipping Strava sync.");
             return report;
@@ -47,15 +47,56 @@ public class SyncStravaService implements SyncStravaUseCase {
         try {
             logger.info("Starting Strava sync...");
             report.info("Starting Strava sync...");
-            spreadsheetPort.createSheet(SHEET_NAME);
 
-            List<List<Object>> existingData = null;
-            try {
-                existingData = spreadsheetPort.getExistingValues(SHEET_NAME + "!A:A");
-            } catch (Exception e) {
-                logger.debug("No existing Strava data found or sheet new: {}", e.getMessage());
+            List<StravaActivity> allFetched = fetchAllActivities();
+
+            // Persist to local database (dedup happens inside WorkoutStore)
+            int dbSaved = workoutStore.saveStravaActivities(allFetched);
+            report.addStravaAdded(dbSaved);
+            report.info("Saved " + dbSaved + " new activities to local database.");
+
+            // Optionally sync to Google Sheets
+            if (appSettings.isGoogleConfigured()) {
+                syncToSheets(allFetched, report);
             }
 
+            report.info("Strava sync complete.");
+        } catch (Exception e) {
+            logger.error("Strava sync failed", e);
+            report.error("Strava sync failed: " + e.getMessage());
+        }
+
+        return report;
+    }
+
+    private List<StravaActivity> fetchAllActivities() throws IOException {
+        List<StravaActivity> allActivities = new ArrayList<>();
+        int page = 1;
+        while (true) {
+            List<StravaActivity> pageActivities = stravaClientPort.getActivities(page, 100);
+            if (pageActivities.isEmpty()) break;
+
+            for (StravaActivity activity : pageActivities) {
+                try {
+                    StravaActivity detailed = stravaClientPort.getActivity(activity.getId());
+                    allActivities.add(detailed);
+                } catch (IOException e) {
+                    logger.warn("Could not fetch details for activity {}: {}", activity.getId(), e.getMessage());
+                    allActivities.add(activity);
+                }
+            }
+
+            logger.info("Fetched {} activities on page {}", pageActivities.size(), page);
+            if (pageActivities.size() < 100) break;
+            page++;
+            if (page > 50) break;
+        }
+        return allActivities;
+    }
+
+    private void syncToSheets(List<StravaActivity> activities, SyncReport report) {
+        try {
+            spreadsheetPort.createSheet(SHEET_NAME);
             List<Object> headers = List.of(
                     "Activity ID", "Name", "Type", "Distance (m)", "Moving Time (s)", "Elapsed Time (s)",
                     "Start Date", "Avg Speed (m/s)", "Max Speed (m/s)", "Elevation Gain (m)",
@@ -64,59 +105,25 @@ public class SyncStravaService implements SyncStravaUseCase {
             spreadsheetPort.ensureHeaders(SHEET_NAME, headers);
 
             Set<String> existingIds = new HashSet<>();
-            if (existingData != null) {
-                for (List<Object> row : existingData) {
-                    if (!row.isEmpty()) {
-                        String id = row.get(0).toString();
-                        if (!id.equalsIgnoreCase("Activity ID")) {
-                            existingIds.add(id);
+            try {
+                List<List<Object>> existingData = spreadsheetPort.getExistingValues(SHEET_NAME + "!A:A");
+                if (existingData != null) {
+                    for (List<Object> row : existingData) {
+                        if (!row.isEmpty()) {
+                            String id = row.get(0).toString();
+                            if (!id.equalsIgnoreCase("Activity ID")) {
+                                existingIds.add(id);
+                            }
                         }
                     }
                 }
-            }
-
-            List<StravaActivity> newActivities = new ArrayList<>();
-            int page = 1;
-            while (true) {
-                List<StravaActivity> pageActivities = stravaClientPort.getActivities(page, 100);
-                if (pageActivities.isEmpty()) {
-                    break;
-                }
-
-                int addedInPage = 0;
-                for (StravaActivity activity : pageActivities) {
-                    if (!existingIds.contains(String.valueOf(activity.getId()))) {
-                        try {
-                            StravaActivity detailed = stravaClientPort.getActivity(activity.getId());
-                            newActivities.add(detailed);
-                        } catch (IOException e) {
-                            logger.warn("Could not fetch details for activity {}: {}", activity.getId(), e.getMessage());
-                            newActivities.add(activity);
-                        }
-                        addedInPage++;
-                    }
-                }
-
-                logger.info("Found {} new activities on page {}", addedInPage, page);
-                if (addedInPage == 0 && !existingIds.isEmpty()) {
-                    break;
-                }
-                if (pageActivities.size() < 100) {
-                    break;
-                }
-                page++;
-                if (page > 50) {
-                    break;
-                }
-            }
-
-            if (newActivities.isEmpty()) {
-                report.info("No new Strava activities to sync.");
-                return report;
+            } catch (Exception e) {
+                logger.debug("No existing Strava data found in sheet: {}", e.getMessage());
             }
 
             List<List<Object>> valuesToAppend = new ArrayList<>();
-            for (StravaActivity activity : newActivities) {
+            for (StravaActivity activity : activities) {
+                if (existingIds.contains(String.valueOf(activity.getId()))) continue;
                 List<Object> row = new ArrayList<>();
                 row.add(normalize(activity.getId()));
                 row.add(normalize(activity.getName()));
@@ -137,15 +144,14 @@ public class SyncStravaService implements SyncStravaUseCase {
                 valuesToAppend.add(row);
             }
 
-            spreadsheetPort.insertRowsAtTop(SHEET_NAME, valuesToAppend);
-            report.addStravaAdded(newActivities.size());
-            report.info("Strava sync complete. Added " + newActivities.size() + " activities.");
+            if (!valuesToAppend.isEmpty()) {
+                spreadsheetPort.insertRowsAtTop(SHEET_NAME, valuesToAppend);
+                report.info("Added " + valuesToAppend.size() + " activities to Google Sheets.");
+            }
         } catch (Exception e) {
-            logger.error("Strava sync failed", e);
-            report.error("Strava sync failed: " + e.getMessage());
+            logger.warn("Google Sheets sync failed (data saved to local DB)", e);
+            report.warn("Google Sheets sync failed: " + e.getMessage());
         }
-
-        return report;
     }
 
     private Object normalize(Object value) {

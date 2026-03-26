@@ -47,3 +47,6 @@ ai-ui/dist/
 src/main/resources/credentials.json
 src/main/resources/service-account.json
 tokens/
+
+### Local Database ###
+data/

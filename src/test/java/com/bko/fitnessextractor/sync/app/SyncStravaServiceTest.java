@@ -7,6 +7,7 @@ import com.bko.fitnessextractor.shared.AppSettings;
 import com.bko.fitnessextractor.shared.GarminSettings;
 import com.bko.fitnessextractor.shared.GoogleSettings;
 import com.bko.fitnessextractor.shared.StravaSettings;
+import com.bko.fitnessextractor.workout.WorkoutStorePort;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -32,8 +33,9 @@ class SyncStravaServiceTest {
         );
         SpreadsheetPort spreadsheetPort = mock(SpreadsheetPort.class);
         StravaClientPort stravaClientPort = mock(StravaClientPort.class);
+        WorkoutStorePort workoutStore = mock(WorkoutStorePort.class);
 
-        SyncStravaService service = new SyncStravaService(spreadsheetPort, stravaClientPort, settings);
+        SyncStravaService service = new SyncStravaService(spreadsheetPort, stravaClientPort, settings, workoutStore);
 
         SyncReport report = service.syncStrava();
 
@@ -51,6 +53,7 @@ class SyncStravaServiceTest {
         );
         SpreadsheetPort spreadsheetPort = mock(SpreadsheetPort.class);
         StravaClientPort stravaClientPort = mock(StravaClientPort.class);
+        WorkoutStorePort workoutStore = mock(WorkoutStorePort.class);
 
         StravaActivity summary = new StravaActivity();
         summary.setId(1L);
@@ -66,12 +69,14 @@ class SyncStravaServiceTest {
         when(stravaClientPort.getActivity(1L)).thenReturn(detail);
         when(spreadsheetPort.getExistingValues("Strava Activities!A:A"))
                 .thenReturn(Collections.singletonList(List.of("Activity ID")));
+        when(workoutStore.saveStravaActivities(any())).thenReturn(1);
 
-        SyncStravaService service = new SyncStravaService(spreadsheetPort, stravaClientPort, settings);
+        SyncStravaService service = new SyncStravaService(spreadsheetPort, stravaClientPort, settings, workoutStore);
 
         SyncReport report = service.syncStrava();
 
         assertEquals(1, report.getStravaAdded());
+        verify(workoutStore).saveStravaActivities(any());
         verify(spreadsheetPort).createSheet("Strava Activities");
         verify(spreadsheetPort).ensureHeaders(eq("Strava Activities"), any());
         verify(spreadsheetPort).insertRowsAtTop(eq("Strava Activities"), any());

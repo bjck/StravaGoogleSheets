@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { askGeminiViaMcp, fetchContext, fetchFitnessSummary, fetchModels, fetchTools, sendChat } from './api';
+import {
+  fetchModels,
+  fetchStats,
+  fetchTools,
+  sendChat,
+  executeTool,
+  triggerSync,
+  type ChatMessageDto,
+} from './api';
 
 export function useModels() {
   return useQuery({
@@ -8,10 +16,11 @@ export function useModels() {
   });
 }
 
-export function useContextSnapshot() {
+export function useStats() {
   return useQuery({
-    queryKey: ['context'],
-    queryFn: fetchContext,
+    queryKey: ['stats'],
+    queryFn: fetchStats,
+    refetchInterval: 30_000,
   });
 }
 
@@ -23,25 +32,25 @@ export function useTools() {
 }
 
 export function useChatMutation() {
+  return useMutation({
+    mutationFn: (vars: { messages: ChatMessageDto[]; model: string; includeContext: boolean }) =>
+      sendChat(vars.messages, vars.model, vars.includeContext),
+  });
+}
+
+export function useToolMutation() {
+  return useMutation({
+    mutationFn: (vars: { toolName: string; args?: Record<string, unknown> }) =>
+      executeTool(vars.toolName, vars.args),
+  });
+}
+
+export function useSyncMutation() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { prompt: string; model: string; includeContext: boolean }) =>
-      sendChat(vars.prompt, vars.model, vars.includeContext),
+    mutationFn: (target: 'strava' | 'garmin' | 'all') => triggerSync(target),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['context'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
     },
-  });
-}
-
-export function useFitnessSummaryMutation() {
-  return useMutation({
-    mutationFn: fetchFitnessSummary,
-  });
-}
-
-export function useAskGeminiViaMcp() {
-  return useMutation({
-    mutationFn: (vars: { prompt: string; model: string; includeContext: boolean }) =>
-      askGeminiViaMcp(vars.prompt, vars.model, vars.includeContext),
   });
 }

@@ -19,6 +19,7 @@ export default defineConfig({
     proxy: {
       '/ai': 'http://localhost:8080',
       '/mcp': 'http://localhost:8080',
+      '/api': 'http://localhost:8080',
     },
   },
 });

@@ -6,6 +6,7 @@ import com.bko.fitnessextractor.integrations.garmin.GarminWellnessSample;
 import com.bko.fitnessextractor.integrations.sheets.SpreadsheetPort;
 import com.bko.fitnessextractor.shared.AppSettings;
 import com.bko.fitnessextractor.sync.SyncGarminUseCase;
+import com.bko.fitnessextractor.workout.WorkoutStorePort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -31,15 +32,18 @@ public class SyncGarminService implements SyncGarminUseCase {
     private final GarminClientPort garminClientPort;
     private final AppSettings appSettings;
     private final Clock clock;
+    private final WorkoutStorePort workoutStore;
 
     public SyncGarminService(SpreadsheetPort spreadsheetPort,
                              GarminClientPort garminClientPort,
                              AppSettings appSettings,
-                             Clock clock) {
+                             Clock clock,
+                             WorkoutStorePort workoutStore) {
         this.spreadsheetPort = spreadsheetPort;
         this.garminClientPort = garminClientPort;
         this.appSettings = appSettings;
         this.clock = clock;
+        this.workoutStore = workoutStore;
     }
 
     @Override
@@ -47,10 +51,6 @@ public class SyncGarminService implements SyncGarminUseCase {
         SyncReport report = new SyncReport();
         report.setGarminAttempted(true);
 
-        if (!appSettings.isGoogleConfigured()) {
-            report.error("Missing Google configuration. Check GOOGLE_SPREADSHEET_ID and GOOGLE_SERVICE_ACCOUNT_KEY_PATH.");
-            return report;
-        }
         if (!appSettings.isGarminConfigured()) {
             report.warn("Garmin credentials missing, skipping Garmin sync.");
             return report;
@@ -63,12 +63,21 @@ public class SyncGarminService implements SyncGarminUseCase {
             garminClientPort.login();
 
             LocalDate today = LocalDate.now(clock);
-            syncGarminMetrics(report, today);
-            try {
-                syncGarminWellnessSamples(report, today);
-            } catch (Exception e) {
-                logger.warn("Garmin stress/HR series sync failed", e);
-                report.warn("Garmin stress/HR series sync failed: " + e.getMessage());
+
+            // Fetch metrics and save to local DB
+            List<GarminMetrics> allMetrics = garminClientPort.getMetricsForLastDays(180);
+            int dbSaved = workoutStore.saveGarminMetrics(allMetrics);
+            report.info("Saved/updated " + dbSaved + " Garmin metrics to local database.");
+
+            // Optionally sync to Google Sheets
+            if (appSettings.isGoogleConfigured()) {
+                syncGarminMetrics(report, today);
+                try {
+                    syncGarminWellnessSamples(report, today);
+                } catch (Exception e) {
+                    logger.warn("Garmin stress/HR series sync failed", e);
+                    report.warn("Garmin stress/HR series sync failed: " + e.getMessage());
+                }
             }
 
             report.info("Garmin sync complete.");

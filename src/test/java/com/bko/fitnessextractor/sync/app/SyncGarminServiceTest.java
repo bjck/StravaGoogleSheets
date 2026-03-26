@@ -8,6 +8,7 @@ import com.bko.fitnessextractor.shared.AppSettings;
 import com.bko.fitnessextractor.shared.GarminSettings;
 import com.bko.fitnessextractor.shared.GoogleSettings;
 import com.bko.fitnessextractor.shared.StravaSettings;
+import com.bko.fitnessextractor.workout.WorkoutStorePort;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
@@ -40,6 +41,7 @@ class SyncGarminServiceTest {
         );
         SpreadsheetPort spreadsheetPort = mock(SpreadsheetPort.class);
         GarminClientPort garminClientPort = mock(GarminClientPort.class);
+        WorkoutStorePort workoutStore = mock(WorkoutStorePort.class);
 
         when(spreadsheetPort.getExistingValues("Garmin Metrics!A:I"))
                 .thenReturn(List.of(List.of(today.toString())));
@@ -49,9 +51,10 @@ class SyncGarminServiceTest {
         GarminMetrics olderMetrics = new GarminMetrics();
         olderMetrics.setDate(today.minusDays(1).toString());
 
-        when(garminClientPort.getMetricsForLastDays(1)).thenReturn(List.of(todayMetrics, olderMetrics));
+        when(garminClientPort.getMetricsForLastDays(anyInt())).thenReturn(List.of(todayMetrics, olderMetrics));
+        when(workoutStore.saveGarminMetrics(any())).thenReturn(2);
 
-        SyncGarminService service = new SyncGarminService(spreadsheetPort, garminClientPort, settings, clock);
+        SyncGarminService service = new SyncGarminService(spreadsheetPort, garminClientPort, settings, clock, workoutStore);
 
         SyncReport report = service.syncGarmin();
 
@@ -62,6 +65,7 @@ class SyncGarminServiceTest {
         verify(spreadsheetPort).updateRow(eq("Garmin Metrics!A1"), any());
         verify(spreadsheetPort).insertRowsAtTop(eq("Garmin Metrics"), any());
         verify(garminClientPort).login();
+        verify(workoutStore).saveGarminMetrics(any());
     }
 
     @Test
@@ -76,9 +80,11 @@ class SyncGarminServiceTest {
         );
         SpreadsheetPort spreadsheetPort = mock(SpreadsheetPort.class);
         GarminClientPort garminClientPort = mock(GarminClientPort.class);
+        WorkoutStorePort workoutStore = mock(WorkoutStorePort.class);
 
         when(spreadsheetPort.getExistingValues("Garmin Metrics!A:I")).thenReturn(List.of());
         when(garminClientPort.getMetricsForLastDays(anyInt())).thenReturn(List.of());
+        when(workoutStore.saveGarminMetrics(any())).thenReturn(0);
 
         List<List<Object>> existingWellness = List.of(
                 List.of("Date", "Timestamp", "Stress", "Heart Rate"),
@@ -101,7 +107,7 @@ class SyncGarminServiceTest {
         when(garminClientPort.getWellnessSamplesForLastDays(anyInt()))
                 .thenReturn(List.of(existing, newer));
 
-        SyncGarminService service = new SyncGarminService(spreadsheetPort, garminClientPort, settings, clock);
+        SyncGarminService service = new SyncGarminService(spreadsheetPort, garminClientPort, settings, clock, workoutStore);
         service.syncGarmin();
 
         InOrder order = inOrder(spreadsheetPort);
