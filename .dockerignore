@@ -3,3 +3,8 @@
 target
 output.txt
 .env
+data/
+ai-ui/node_modules
+ai-ui/dist
+ai-ui/.vite
+docs/

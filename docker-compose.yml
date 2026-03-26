@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: fitness-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fitness
+      POSTGRES_USER: fitness
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-fitness}
+    volumes:
+      - fitness-pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fitness"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build: .
+    container_name: fitness-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8181:8181"
+    environment:
+      SERVER_PORT: "8181"
+      DATABASE_URL: jdbc:postgresql://db:5432/fitness
+      DATABASE_USER: fitness
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-fitness}
+      # Strava credentials (set in .env or pass directly)
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
+      STRAVA_REFRESH_TOKEN: ${STRAVA_REFRESH_TOKEN:-}
+      # Garmin credentials
+      GARMIN_USERNAME: ${GARMIN_USERNAME:-}
+      GARMIN_PASSWORD: ${GARMIN_PASSWORD:-}
+      GARMIN_SESSION_COOKIE: ${GARMIN_SESSION_COOKIE:-}
+      GARMIN_GARTH_TOKEN: ${GARMIN_GARTH_TOKEN:-}
+      # Google Sheets (optional now)
+      GOOGLE_SPREADSHEET_ID: ${GOOGLE_SPREADSHEET_ID:-}
+      GOOGLE_SERVICE_ACCOUNT_KEY_PATH: ${GOOGLE_SERVICE_ACCOUNT_KEY_PATH:-}
+      # Gemini AI
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AI_GEMINI_DEFAULT_MODEL: ${AI_GEMINI_DEFAULT_MODEL:-gemini-2.0-flash}
+
+volumes:
+  fitness-pgdata:

@@ -1,13 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  fetchModels,
-  fetchStats,
-  fetchTools,
-  sendChat,
-  executeTool,
-  triggerSync,
-  type ChatMessageDto,
-} from './api';
+import { fetchModels, fetchStats, sendChat, triggerSync, type ChatMessageDto } from './api';
 
 export function useModels() {
   return useQuery({
@@ -24,24 +16,10 @@ export function useStats() {
   });
 }
 
-export function useTools() {
-  return useQuery({
-    queryKey: ['tools'],
-    queryFn: fetchTools,
-  });
-}
-
 export function useChatMutation() {
   return useMutation({
     mutationFn: (vars: { messages: ChatMessageDto[]; model: string; includeContext: boolean }) =>
       sendChat(vars.messages, vars.model, vars.includeContext),
-  });
-}
-
-export function useToolMutation() {
-  return useMutation({
-    mutationFn: (vars: { toolName: string; args?: Record<string, unknown> }) =>
-      executeTool(vars.toolName, vars.args),
   });
 }
 

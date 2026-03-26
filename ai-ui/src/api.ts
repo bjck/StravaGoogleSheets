@@ -51,8 +51,6 @@ export type TypeSummary = {
   totalHours?: number;
 };
 
-export type McpTool = { name: string; description: string };
-
 // --- API calls ---
 
 export async function fetchModels(): Promise<ModelOption[]> {
@@ -71,17 +69,6 @@ export async function sendChat(
   return json<ChatResponseDto>(`${base}/ai/chat`, {
     method: 'POST',
     body: JSON.stringify({ messages, includeContext, model }),
-  });
-}
-
-export async function fetchTools(): Promise<McpTool[]> {
-  return json<McpTool[]>(`${base}/mcp/tools`);
-}
-
-export async function executeTool(toolName: string, args?: Record<string, unknown>): Promise<unknown> {
-  return json(`${base}/mcp/tools/${toolName}`, {
-    method: 'POST',
-    body: JSON.stringify(args || {}),
   });
 }
 

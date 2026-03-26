@@ -123,14 +123,14 @@
             <version>5.2.1</version>
         </dependency>
 
-        <!-- Spring Data JPA + H2 for local workout storage -->
+        <!-- Spring Data JPA + PostgreSQL for workout storage -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.h2database</groupId>
-            <artifactId>h2</artifactId>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
 
