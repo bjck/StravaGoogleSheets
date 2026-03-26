@@ -38,6 +38,8 @@ node_modules/
 ai-ui/node_modules/
 ai-ui/.vite/
 ai-ui/dist/
+ai-ui/test-results/
+ai-ui/playwright-report/
 
 ### Mac OS ###
 .DS_Store
